@@ -36,9 +36,6 @@ export interface Booking {
     email: string;
     phone: string;
     passportNumber: string;
-    creditCardCardholder?: string;
-    creditCardNumber?: string;
-    creditCardExpiry?: string;
   };
   encryptedFields?: Record<string, string>;
 }

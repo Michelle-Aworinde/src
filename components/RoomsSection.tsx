@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getRooms } from "../lib/firebase";
 import type { Room } from "../types";
 
 interface Props {
@@ -11,8 +12,7 @@ export default function RoomsSection({ onBook }: Props) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch("/api/rooms")
-      .then((r) => r.json())
+    getRooms()
       .then((data) => setRooms(data))
       .catch(() => setError("Could not load rooms. Please refresh the page."))
       .finally(() => setLoading(false));
@@ -28,7 +28,7 @@ export default function RoomsSection({ onBook }: Props) {
             <p className="section-sub">Every room is beautiful and elegant</p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--muted)", fontSize: "0.82rem" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="14" height="55" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
             </svg>
             All prices in NGN

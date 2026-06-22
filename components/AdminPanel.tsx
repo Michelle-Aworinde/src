@@ -1,4 +1,18 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
+import {
+  approveReview,
+  createAdminBooking,
+  deleteAdminBooking,
+  deleteReview,
+  deleteRoom,
+  getAdminBookings,
+  getAdminReviews,
+  getAdminRooms,
+  saveRoom,
+  signInAdmin,
+  updateAdminBooking,
+  updateRoom,
+} from "../lib/firebase";
 import type { Booking, Review, AdminStats } from "../types";
 
 interface Props {
@@ -38,14 +52,9 @@ function AdminLogin({ onLogin }: { onLogin: (t: string) => void }) {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/admin/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: pw }),
-      });
-      const data = await res.json();
-      if (!res.ok) setError(data.error || "Authentication failed.");
-      else onLogin(data.token);
+      const email = import.meta.env.VITE_ADMIN_EMAIL || "admin@femlisterlodge.com";
+      const user = await signInAdmin(email, pw);
+      onLogin(user.uid);
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -117,36 +126,35 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
   const [loadingReviews, setLoadingReviews] = useState(true);
   const [globalError, setGlobalError] = useState("");
 
-  const authHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
-
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/stats", { headers: authHeaders });
-      if (res.status === 401) { onLogout(); return; }
-      setStats(await res.json());
+      const bookings = await getAdminBookings();
+      const active = bookings.filter((b) => b.status === "confirmed" || b.status === "checked-in");
+      setStats({
+        totalBookings: bookings.length,
+        totalRevenue: active.reduce((sum, b) => sum + b.totalPrice, 0),
+        activeGuests: active.reduce((sum, b) => sum + b.guests, 0),
+        occupancyRate: Math.min(Math.round((active.length / 3) * 100), 100),
+      });
     } catch { setGlobalError("Failed to load statistics."); }
     finally { setLoadingStats(false); }
-  }, [token]);
+  }, []);
 
   const fetchBookings = useCallback(async () => {
     setLoadingBookings(true);
     try {
-      const res = await fetch("/api/admin/bookings", { headers: authHeaders });
-      if (res.status === 401) { onLogout(); return; }
-      setBookings(await res.json());
+      setBookings(await getAdminBookings());
     } catch { setGlobalError("Failed to load bookings."); }
     finally { setLoadingBookings(false); }
-  }, [token]);
+  }, []);
 
   const fetchReviews = useCallback(async () => {
     setLoadingReviews(true);
     try {
-      const res = await fetch("/api/admin/reviews", { headers: authHeaders });
-      if (res.status === 401) { onLogout(); return; }
-      setReviews(await res.json());
+      setReviews(await getAdminReviews());
     } catch { setGlobalError("Failed to load reviews."); }
     finally { setLoadingReviews(false); }
-  }, [token]);
+  }, []);
 
   useEffect(() => { fetchStats(); fetchBookings(); fetchReviews(); }, [fetchStats, fetchBookings, fetchReviews]);
 
@@ -257,23 +265,20 @@ function BookingsTab({ bookings, loading, token, onRefresh, onLogout }: {
   const [createData, setCreateData] = useState<any>(INITIAL_CREATE_DATA);
   const [creating, setCreating] = useState(false);
 
-  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
-
   const filtered = filter === "all" ? bookings : bookings.filter((b) => b.status === filter);
 
   async function saveEdit(id: string) {
     setSaving(true);
     setActionError("");
     try {
-      const res = await fetch(`/api/admin/bookings/${id}/amend`, {
-        method: "POST", headers,
-        body: JSON.stringify(editData),
-      });
-      const data = await res.json();
-      if (res.status === 401) { onLogout(); return; }
-      if (!res.ok) { setActionError(data.error || "Save failed."); }
-      else { setEditId(null); setEditData({}); onRefresh(); }
-    } catch { setActionError("Network error."); }
+      await updateAdminBooking(id, editData as any);
+      setEditId(null);
+      setEditData({});
+      onRefresh();
+    } catch (err: any) { 
+      console.error('Save error:', err);
+      setActionError(err?.message || "Save failed."); 
+    }
     finally { setSaving(false); }
   }
 
@@ -281,11 +286,9 @@ function BookingsTab({ bookings, loading, token, onRefresh, onLogout }: {
     setDeleting(id);
     setActionError("");
     try {
-      const res = await fetch(`/api/admin/bookings/${id}`, { method: "DELETE", headers });
-      if (res.status === 401) { onLogout(); return; }
-      if (!res.ok) { const d = await res.json(); setActionError(d.error || "Delete failed."); }
-      else onRefresh();
-    } catch { setActionError("Network error."); }
+      await deleteAdminBooking(id);
+      onRefresh();
+    } catch { setActionError("Delete failed."); }
     finally { setDeleting(null); }
   }
 
@@ -293,12 +296,7 @@ function BookingsTab({ bookings, loading, token, onRefresh, onLogout }: {
     setLoadingRooms(true);
     setRoomError("");
     try {
-      const res = await fetch('/api/rooms');
-      const data = await res.json();
-      if (!Array.isArray(data)) {
-        setRoomError('Unable to load room options.');
-        return;
-      }
+      const data = await getAdminRooms();
       setRooms(data);
       const validRoomIds = data.map((room: any) => room.id);
       if (!validRoomIds.includes(createData.roomId) && data.length > 0) {
@@ -358,20 +356,13 @@ function BookingsTab({ bookings, loading, token, onRefresh, onLogout }: {
           phone: createData.customer?.phone,
         },
       };
-      const res = await fetch(`/api/admin/bookings`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-      });
-      if (res.status === 401) { onLogout(); return; }
-      const text = await res.text();
-      let data;
-      try { data = JSON.parse(text); } catch { data = { error: text || 'Unknown server response.' }; }
-      if (!res.ok) { setActionError(data.error || 'Create failed.'); }
-      else { setShowCreate(false); setCreateData(INITIAL_CREATE_DATA); onRefresh(); }
+      await createAdminBooking(payload);
+      setShowCreate(false);
+      setCreateData(INITIAL_CREATE_DATA);
+      onRefresh();
     } catch (e: any) {
       console.error('Admin create booking error', e);
-      setActionError('Network error. Please confirm server is running and try again.');
+      setActionError(e.message || 'Create failed.');
     } finally { setCreating(false); }
   }
 
@@ -492,8 +483,8 @@ function BookingsTab({ bookings, loading, token, onRefresh, onLogout }: {
             </thead>
             <tbody>
               {filtered.map((b) => (
-                <>
-                  <tr key={b.id} style={{ cursor: "pointer" }} onClick={() => setExpanded(expanded === b.id ? null : b.id)}>
+                <Fragment key={b.id}>
+                  <tr style={{ cursor: "pointer" }} onClick={() => setExpanded(expanded === b.id ? null : b.id)}>
                     <td style={{ fontFamily: "monospace", fontSize: "0.82rem", fontWeight: 600, color: "var(--dark)" }}>{b.id}</td>
                     <td style={{ whiteSpace: "nowrap", maxWidth: "160px", overflow: "hidden", textOverflow: "ellipsis" }}>{b.roomName}</td>
                     <td>{b.customer.firstName} {b.customer.lastName}</td>
@@ -570,7 +561,7 @@ function BookingsTab({ bookings, loading, token, onRefresh, onLogout }: {
 
                   {/* Edit form */}
                   {editId === b.id && (
-                    <tr key={`${b.id}-edit`}>
+                    <tr>
                       <td colSpan={8} style={{ background: "var(--cream-light)", padding: "1.5rem" }}>
                         <p style={{ fontSize: "0.7rem", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--gold)", marginBottom: "1.25rem" }}>
                           Editing {b.id}
@@ -618,7 +609,7 @@ function BookingsTab({ bookings, loading, token, onRefresh, onLogout }: {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -636,7 +627,6 @@ function ReviewsTab({ reviews, loading, token, onRefresh, onLogout }: {
   const [acting, setActing] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [showAll, setShowAll] = useState(false);
-  const headers = { Authorization: `Bearer ${token}` };
 
   const displayed = showAll ? reviews : reviews.filter((r) => !r.approved);
 
@@ -644,11 +634,9 @@ function ReviewsTab({ reviews, loading, token, onRefresh, onLogout }: {
     setActing(id);
     setError("");
     try {
-      const res = await fetch(`/api/admin/reviews/${id}/approve`, { method: "POST", headers });
-      if (res.status === 401) { onLogout(); return; }
-      if (!res.ok) setError("Approval failed.");
-      else onRefresh();
-    } catch { setError("Network error."); }
+      await approveReview(id);
+      onRefresh();
+    } catch { setError("Approval failed."); }
     finally { setActing(null); }
   }
 
@@ -657,11 +645,9 @@ function ReviewsTab({ reviews, loading, token, onRefresh, onLogout }: {
     setActing(id);
     setError("");
     try {
-      const res = await fetch(`/api/admin/reviews/${id}`, { method: "DELETE", headers });
-      if (res.status === 401) { onLogout(); return; }
-      if (!res.ok) setError("Delete failed.");
-      else onRefresh();
-    } catch { setError("Network error."); }
+      await deleteReview(id);
+      onRefresh();
+    } catch { setError("Delete failed."); }
     finally { setActing(null); }
   }
 
@@ -754,14 +740,11 @@ function RoomsTab({ token, onLogout }: { token: string; onLogout: () => void }) 
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<any>({ id: "", name: "", description: "", pricePerNight: 0, capacity: 1, amenities: [], image: "" });
 
-  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
-
   async function fetchRooms() {
     setLoading(true); setError("");
     try {
-      const res = await fetch('/api/admin/rooms', { headers });
-      if (res.status === 401) { onLogout(); return; }
-      const data = await res.json(); setRooms(data || []);
+      const data = await getAdminRooms();
+      setRooms(data || []);
     } catch { setError('Failed to load rooms.'); }
     finally { setLoading(false); }
   }
@@ -776,21 +759,23 @@ function RoomsTab({ token, onLogout }: { token: string; onLogout: () => void }) 
       if (!form.id || !form.name) { setError('Id and name are required.'); return; }
       const url = editing ? `/api/admin/rooms/${editing}/amend` : '/api/admin/rooms';
       const method = editing ? 'POST' : 'POST';
-      const res = await fetch(url, { method, headers, body: JSON.stringify(form) });
-      if (res.status === 401) { onLogout(); return; }
-      const data = await res.json(); if (!res.ok) { setError(data.error || 'Save failed.'); return; }
-      setForm({ id: "", name: "", description: "", pricePerNight: 0, capacity: 1, amenities: [], image: "" }); setEditing(null); fetchRooms();
-    } catch { setError('Network error.'); }
+      if (editing) {
+        await updateRoom(editing, form);
+      } else {
+        await saveRoom(form);
+      }
+      setForm({ id: "", name: "", description: "", pricePerNight: 0, capacity: 1, amenities: [], image: "" });
+      setEditing(null);
+      fetchRooms();
+    } catch { setError('Save failed.'); }
   }
 
   async function remove(id: string) {
     if (!confirm('Delete room permanently?')) return;
     try {
-      const res = await fetch(`/api/admin/rooms/${id}`, { method: 'DELETE', headers });
-      if (res.status === 401) { onLogout(); return; }
-      if (!res.ok) { const d = await res.json(); setError(d.error || 'Delete failed.'); return; }
+      await deleteRoom(id);
       fetchRooms();
-    } catch { setError('Network error.'); }
+    } catch { setError('Delete failed.'); }
   }
 
   if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "4rem" }}><div className="spinner spinner-dark" /></div>;

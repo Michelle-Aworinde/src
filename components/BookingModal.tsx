@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { createBooking } from "../lib/firebase";
 import type { Room, CustomerForm } from "../types";
 
 interface Props {
@@ -232,49 +233,24 @@ export default function BookingModal({ room, onClose }: Props) {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/bookings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId: room.id, checkIn, checkOut, guests, customer }),
+      const data = await createBooking({
+        roomId: room.id,
+        checkIn,
+        checkOut,
+        guests,
+        customer,
       });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || "Booking failed. Please try again."); setLoading(false); return; }
-      // Ask server to send confirmation email (best-effort) immediately
-      try {
-        await fetch(`/api/bookings/${data.id}/send-email`, { method: "POST" });
-      } catch (e) { /* ignore - email is best-effort */ }
-
-      // Initiate payment
-      const payRes = await fetch("/api/moniepoint/initiate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: data.totalPrice,
-          email: customer.email,
-          name: `${customer.firstName} ${customer.lastName}`,
-          phoneNumber: `${customer.phoneAreaCode}${customer.phone.replace(/[\s()\-]/g, "")}`,
-          bookingId: data.id,
-        }),
-      });
-      const payData = await payRes.json();
-
-      if (payData.live && payData.checkoutUrl) {
-        // Real Moniepoint — redirect
-        window.location.href = payData.checkoutUrl;
-        return;
-      }
 
       setConfirmed({
         id: data.id,
         nights: data.nights || nights,
         totalPrice: data.totalPrice,
-        payRef: payData.reference,
-        live: payData.live,
-        // include payAtHotel flag when returned by server
-        payAtHotel: payData.payAtHotel || false,
+        payRef: data.id,
+        live: false,
+        payAtHotel: data.payAtHotel || false,
       } as any);
-    } catch {
-      setError("A network error occurred. Please check your connection and try again.");
+    } catch (err: any) {
+      setError(err.message || "Booking failed. Please try again.");
     } finally {
       setLoading(false);
     }

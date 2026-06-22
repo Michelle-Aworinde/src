@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { cancelBooking, searchBooking } from "../lib/firebase";
 import type { Booking } from "../types";
 
 interface Props {
@@ -40,36 +41,26 @@ export default function BookingSearch({ onBack }: Props) {
     setCancelError("");
 
     try {
-      const res = await fetch(`/api/bookings/search?id=${encodeURIComponent(ref.trim())}&lastName=${encodeURIComponent(lastName.trim())}`);
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || "Reservation not found."); }
-      else setBooking(data);
-    } catch {
-      setError("Could not reach the server. Please try again.");
+      const data = await searchBooking(ref.trim(), lastName.trim());
+      setBooking(data);
+    } catch (err: any) {
+      setError(err.message || "Reservation not found.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function cancelBooking() {
+  async function handleCancelBooking() {
     if (!booking) return;
     setCancelling(true);
     setCancelError("");
     try {
-      const res = await fetch(`/api/bookings/${booking.id}/cancel`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lastName }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setCancelError(data.error || "Cancellation failed."); }
-      else {
-        setCancelSuccess(true);
-        setBooking((b) => b ? { ...b, status: "cancelled" } : b);
-        setShowCancelConfirm(false);
-      }
-    } catch {
-      setCancelError("Network error. Please try again.");
+      await cancelBooking(booking.id, lastName);
+      setCancelSuccess(true);
+      setBooking((b) => b ? { ...b, status: "cancelled" } : b);
+      setShowCancelConfirm(false);
+    } catch (err: any) {
+      setCancelError(err.message || "Cancellation failed.");
     } finally {
       setCancelling(false);
     }
@@ -181,7 +172,7 @@ export default function BookingSearch({ onBack }: Props) {
                         This action cannot be undone. Are you sure you want to cancel booking <strong>{booking.id}</strong>?
                       </p>
                       <div style={{ display: "flex", gap: "0.75rem" }}>
-                        <button className="btn-danger" onClick={cancelBooking} disabled={cancelling}>
+                        <button className="btn-danger" onClick={handleCancelBooking} disabled={cancelling}>
                           {cancelling ? <><span className="spinner" /> Cancelling…</> : "Yes, Cancel"}
                         </button>
                         <button className="btn-ghost" onClick={() => setShowCancelConfirm(false)}>Keep Reservation</button>

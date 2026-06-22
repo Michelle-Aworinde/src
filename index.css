@@ -323,7 +323,7 @@ select.field-input {
 }
 .room-card:hover { transform: translateY(-5px); box-shadow: var(--shadow-lg); }
 
-.room-img-wrap { position: relative; height: 230px; overflow: hidden; }
+.room-img-wrap { position: relative; height: 400px; overflow: hidden; }
 .room-img {
   width: 100%; height: 100%; object-fit: cover;
   transition: transform 0.5s;

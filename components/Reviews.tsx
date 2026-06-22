@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getApprovedReviews, submitReview } from "../lib/firebase";
 import type { Review } from "../types";
 
 function Stars({ rating, interactive, onChange }: { rating: number; interactive?: boolean; onChange?: (n: number) => void }) {
@@ -40,8 +41,7 @@ export default function Reviews() {
   const [formSuccess, setFormSuccess] = useState("");
 
   useEffect(() => {
-    fetch("/api/reviews")
-      .then((r) => r.json())
+    getApprovedReviews()
       .then((data) => setReviews(Array.isArray(data) ? data : []))
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -56,17 +56,13 @@ export default function Reviews() {
     setSubmitting(true);
     setFormError("");
     try {
-      const res = await fetch("/api/reviews", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ author, location, rating, comment, bookingId }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setFormError(data.error); }
-      else {
-        setFormSuccess(data.message);
+      const data = await submitReview({ author, location, rating, comment, bookingId });
+      if (data.success) {
+        setFormSuccess("Thank you for your feedback. Your review will appear after verification.");
         setAuthor(""); setLocation(""); setRating(5); setComment(""); setBookingId("");
         setShowForm(false);
+      } else {
+        setFormError("Unable to submit review.");
       }
     } catch {
       setFormError("Network error. Please try again.");

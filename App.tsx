@@ -9,6 +9,7 @@ import AdminPanel from "./components/AdminPanel";
 import AmenitiesSection from "./components/AmenitiesSection";
 import MapSection from "./components/MapSection";
 import Footer from "./components/Footer";
+import { isFirebaseConfigured } from "./lib/firebase";
 import type { Room } from "./types";
 
 export type AppView = "home" | "search" | "admin";
@@ -54,6 +55,26 @@ export default function App() {
         onLogout={handleAdminLogout}
         onScrollRooms={scrollToRooms}
       />
+
+      {import.meta.env.DEV && (
+        <div
+          style={{
+            position: "fixed",
+            right: "0.75rem",
+            top: "4.75rem",
+            zIndex: 1000,
+            background: isFirebaseConfigured ? "rgba(34, 197, 94, 0.92)" : "rgba(248, 113, 113, 0.92)",
+            color: "white",
+            padding: "0.4rem 0.65rem",
+            borderRadius: "999px",
+            fontSize: "0.72rem",
+            fontWeight: 700,
+            boxShadow: "0 6px 18px rgba(0,0,0,0.18)",
+          }}
+        >
+          {isFirebaseConfigured ? "Firebase: live" : "Firebase: fallback"}
+        </div>
+      )}
 
       {view === "home" && (
         <>
