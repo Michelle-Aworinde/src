@@ -18,7 +18,7 @@ import {
 } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import type { Booking, Review, Room } from "../types";
-import { sendBookingNotifications } from "./email";
+import { sendBookingNotifications, sendBookingStatusEmail } from "./email";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
@@ -319,7 +319,8 @@ export async function searchBooking(reference: string, lastName: string) {
 
 export async function cancelBooking(reference: string, lastName: string) {
   requireFirestore();
-  const snapshot = await getDoc(doc(db!, "bookings", reference));
+  const docRef = doc(db!, "bookings", reference);
+  const snapshot = await getDoc(docRef);
   if (!snapshot.exists()) {
     throw new Error("Reservation not found.");
   }
@@ -327,7 +328,15 @@ export async function cancelBooking(reference: string, lastName: string) {
   if (booking.customer.lastName.toLowerCase() !== lastName.trim().toLowerCase()) {
     throw new Error("Last name does not match this reservation.");
   }
-  await updateDoc(doc(db!, "bookings", reference), { status: "cancelled" });
+
+  await updateDoc(docRef, { status: "cancelled" });
+
+  try {
+    await sendBookingStatusEmail({ ...booking, status: "cancelled" }, "cancelled");
+  } catch (error) {
+    console.warn("Failed to send cancellation email for guest booking.", error);
+  }
+
   return { success: true };
 }
 
@@ -342,22 +351,53 @@ export async function getAdminBookings(): Promise<Booking[]> {
 export async function updateAdminBooking(id: string, changes: Partial<Booking>) {
   requireFirestore();
   const docRef = doc(db!, "bookings", id);
-  
-  // If updating customer object, fetch current data and merge
-  if (changes.customer) {
-    const currentDoc = await getDoc(docRef);
-    if (currentDoc.exists()) {
-      const currentData = currentDoc.data();
-      changes.customer = { ...currentData.customer, ...changes.customer };
-    }
+  const currentDoc = await getDoc(docRef);
+  if (!currentDoc.exists()) {
+    throw new Error("Booking not found.");
   }
-  
+
+  const currentData = currentDoc.data();
+  const oldStatus = currentData.status || "confirmed";
+
+  if (changes.customer) {
+    changes.customer = { ...currentData.customer, ...changes.customer };
+  }
+
   await updateDoc(docRef, changes as any);
+
+  const updatedBooking = normalizeBooking({ id, ...currentData, ...changes });
+
+  try {
+    if (changes.status === "checked-in") {
+      await sendBookingStatusEmail(updatedBooking, "checked-in");
+    } else if (changes.status === "cancelled") {
+      await sendBookingStatusEmail(updatedBooking, "cancelled");
+    } else if (oldStatus !== updatedBooking.status) {
+      await sendBookingStatusEmail(updatedBooking, "amendment");
+    } else {
+      await sendBookingStatusEmail(updatedBooking, "amendment");
+    }
+  } catch (error) {
+    console.warn("Failed to send booking update email after admin amendment.", error);
+  }
 }
 
 export async function deleteAdminBooking(id: string) {
   requireFirestore();
-  await deleteDoc(doc(db!, "bookings", id));
+  const docRef = doc(db!, "bookings", id);
+  const currentDoc = await getDoc(docRef);
+  if (!currentDoc.exists()) {
+    throw new Error("Booking not found.");
+  }
+
+  const booking = normalizeBooking({ id, ...currentDoc.data() });
+  await deleteDoc(docRef);
+
+  try {
+    await sendBookingStatusEmail({ ...booking, status: "cancelled" }, "cancelled");
+  } catch (error) {
+    console.warn("Failed to send cancellation email after admin deletion.", error);
+  }
 }
 
 export async function createAdminBooking(payload: {
